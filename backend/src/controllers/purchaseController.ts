@@ -1,4 +1,4 @@
-//backend\src\controllers\purchaseController.ts
+// src/controllers/purchaseController.ts
 import { Request, Response } from 'express';
 import { PurchaseService } from '../services/purchaseService';
 import { TonService } from '../services/tonService';
@@ -14,7 +14,11 @@ export class PurchaseController {
       const { telegramId, walletAddress, transactionHash, amount } = req.body;
 
       // Проверяем транзакцию
-      const isValid = await this.tonService.verifyPurchase(transactionHash, amount.toString());
+      const isValid = await this.tonService.verifyPurchase(
+        transactionHash, 
+        amount.toString()
+      );
+
       if (!isValid) {
         return res.status(400).json({ error: 'Invalid transaction' });
       }
@@ -54,18 +58,15 @@ export class PurchaseController {
     try {
       const { purchaseId, telegramId } = req.body;
 
-      // Проверяем существование покупки
       const purchase = await this.purchaseService.getPurchaseById(purchaseId);
       if (!purchase || purchase.telegramId !== telegramId) {
         return res.status(404).json({ error: 'Purchase not found' });
       }
 
-      // Проверяем, что покупка еще не завершена
       if (purchase.completed || purchase.refunded) {
         return res.status(400).json({ error: 'Purchase already completed' });
       }
 
-      // Отмечаем как выполненную
       const completedPurchase = await this.purchaseService.completePurchase(purchaseId);
       
       res.json(completedPurchase);

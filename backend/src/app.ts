@@ -1,17 +1,20 @@
-// src/app.ts
 import express from 'express';
 import cors from 'cors';
+import mongoose from 'mongoose';
 import { purchaseRoutes } from './routes/purchaseRoutes';
+import { walletRoutes } from './routes/walletRoutes';
 import { errorHandler } from './middleware/errorHandler';
 import { connectDB } from './config/database';
 
 const app = express();
 
+// Middlewares
 app.use(cors());
 app.use(express.json());
 
 // Routes
 app.use('/api/purchases', purchaseRoutes);
+app.use('/api/wallet', walletRoutes);
 
 // Error handler
 app.use(errorHandler);
@@ -34,7 +37,11 @@ const start = async () => {
 
 start();
 
+// Graceful shutdown
 process.on('SIGTERM', async () => {
-  await mongoose.connection.close();
+  console.log('SIGTERM received. Closing HTTP server...');
+  if (mongoose.connection.readyState === 1) {
+    await mongoose.connection.close();
+  }
   process.exit(0);
 });

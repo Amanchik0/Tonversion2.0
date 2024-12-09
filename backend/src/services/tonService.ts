@@ -1,6 +1,20 @@
-//backend\src\services\tonService.ts
-import { TonClient, Address, Transaction } from 'ton';
+// src/services/tonService.ts
+import { TonClient, Address, Message, Dictionary } from 'ton';
 import { ContractData } from '../types';
+
+// Расширяем тип Message, добавляя нужные нам поля
+interface ExtendedMessage extends Message {
+  value: bigint;
+  source?: Address;
+  destination?: Address;
+}
+
+// Расширяем тип Transaction с правильными типами
+interface ExtendedTransaction {
+  inMessage?: ExtendedMessage;
+  outMessages: Dictionary<number, ExtendedMessage>;
+  hash: string;
+}
 
 export class TonService {
   private client: TonClient;
@@ -9,14 +23,13 @@ export class TonService {
   constructor(contractData: ContractData) {
     this.client = new TonClient({
       endpoint: 'https://toncenter.com/api/v2/jsonRPC',
-      apiKey: process.env.TON_API_KEY // Добавим API ключ для toncenter
+      apiKey: process.env.TON_API_KEY
     });
     this.contractAddress = contractData.address;
   }
 
   async verifyPurchase(transactionHash: string, amount: string): Promise<boolean> {
     try {
-      // Получаем транзакцию по хешу
       const transactions = await this.client.getTransactions(
         Address.parse(this.contractAddress), 
         {
@@ -29,15 +42,14 @@ export class TonService {
         return false;
       }
 
-      const tx = transactions[0];
+      const tx = transactions[0] as unknown as ExtendedTransaction;
       
-      // Проверяем сумму транзакции
       if (!tx.inMessage?.value) {
         return false;
       }
 
       // Сравниваем сумму (в нанотонах)
-      return tx.inMessage.value === amount;
+      return tx.inMessage.value.toString() === amount;
       
     } catch (error) {
       console.error('Verify purchase error:', error);
@@ -45,13 +57,12 @@ export class TonService {
     }
   }
 
-  // Добавим метод для проверки статуса контракта
   async getContractStatus(): Promise<boolean> {
     try {
       const balance = await this.client.getBalance(
         Address.parse(this.contractAddress)
       );
-      return balance > 0; // Проверяем что контракт существует и имеет баланс
+      return balance > 0;
     } catch (error) {
       console.error('Get contract status error:', error);
       return false;

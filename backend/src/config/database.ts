@@ -13,7 +13,7 @@ export const connectDB = async (): Promise<void> => {
     }
 
     await mongoose.connect(uri);
-    console.log('Successfully connected to MongoDB Atlas');
+    console.log('Successfully connected to MongoDB');
   } catch (error) {
     console.error('Database connection error:', error);
     throw error;
