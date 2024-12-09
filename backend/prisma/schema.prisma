@@ -1,0 +1,22 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL") 
+}
+
+model Purchase {
+  id              String   @id @default(uuid())
+  telegramId      String
+  walletAddress   String
+  transactionHash String
+  amount          Float
+  completed       Boolean  @default(false)
+  refunded        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([telegramId])
+  @@index([walletAddress])
+}
