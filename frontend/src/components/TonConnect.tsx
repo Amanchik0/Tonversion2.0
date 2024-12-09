@@ -1,3 +1,4 @@
+//frontend\src\components\TonConnect.tsx
 'use client';
 
 import { TonConnectButton, TonConnectUIProvider, useTonAddress } from '@tonconnect/ui-react';

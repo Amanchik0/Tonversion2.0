@@ -1,11 +1,21 @@
+// src/config/database.ts
 import mongoose from 'mongoose';
+import dotenv from 'dotenv';
 
-export const connectDB = async () => {
+dotenv.config();
+
+export const connectDB = async (): Promise<void> => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI as string);
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
+    const uri = process.env.MONGODB_URI;
+    
+    if (!uri) {
+      throw new Error('MONGODB_URI is not defined');
+    }
+
+    await mongoose.connect(uri);
+    console.log('Successfully connected to MongoDB Atlas');
   } catch (error) {
-    console.error('Error connecting to MongoDB:', error);
-    process.exit(1);
+    console.error('Database connection error:', error);
+    throw error;
   }
 };

@@ -1,3 +1,4 @@
+//frontend\src\components\CourseCard.tsx
 'use client';
 
 interface CourseCardProps {
