@@ -1,0 +1,70 @@
+;; contracts/Purchase.fc
+
+#pragma version >=0.2.0;
+
+;; Storage structure:
+;; owner_address: MsgAddress
+;; purchases: HashmapE(256, Coins)
+
+(slice, cell) load_data() inline {
+    slice ds = get_data().begin_parse();
+    return (ds~load_msg_addr(), ds~load_dict());
+}
+
+() save_data(slice owner_address, cell purchases) impure inline {
+    begin_cell()
+        .store_slice(owner_address)
+        .store_dict(purchases)
+        .end_cell()
+        .set_data();
+}
+
+;; Receive TON payment
+() recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {
+    if (msg_value == 0) { ;; ignore empty messages
+        return ();
+    }
+
+    slice cs = in_msg_full.begin_parse();
+    int flags = cs~load_uint(4);
+    if (flags & 1) { ;; ignore all bounced messages
+        return ();
+    }
+    slice sender_address = cs~load_msg_addr();
+
+    (slice owner_address, cell purchases) = load_data();
+    
+    ;; Store payment info
+    purchases~udict_set_builder(
+        256,
+        slice_hash(sender_address),
+        begin_cell().store_coins(msg_value)
+    );
+    
+    save_data(owner_address, purchases);
+}
+
+;; Process refund (can be called only by owner)
+() process_refund(slice user_address) impure {
+    (slice owner_address, cell purchases) = load_data();
+    
+    ;; Check if sender is owner
+    throw_unless(401, equal_slices(sender_address, owner_address));
+    
+    ;; Get user's payment
+    (slice payment_info, int success) = purchases.udict_get?(256, slice_hash(user_address));
+    throw_unless(404, success);
+    
+    int payment_amount = payment_info~load_coins();
+    int refund_amount = muldiv(payment_amount, 7, 10); ;; Calculate 70%
+    
+    ;; Send refund
+    var msg = begin_cell()
+        .store_uint(0x10, 6) ;; nobounce
+        .store_slice(user_address)
+        .store_coins(refund_amount)
+        .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+        .end_cell();
+    
+    send_raw_message(msg, 1);
+}

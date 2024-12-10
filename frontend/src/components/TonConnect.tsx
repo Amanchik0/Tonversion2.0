@@ -1,10 +1,16 @@
-//frontend\src\components\TonConnect.tsx
+// src/components/TonConnect.tsx
 'use client';
 
-import { TonConnectButton, TonConnectUIProvider, useTonAddress } from '@tonconnect/ui-react';
-import { useEffect } from 'react';
-import { telegram } from '@/utils/telegram';
+import { 
+  TonConnectButton, 
+  useTonAddress, 
+  useTonConnectUI,
+  TonConnectUIProvider 
+} from '@tonconnect/ui-react';
+import { useEffect, useState } from 'react';
+import { telegram } from '../utils/telegram';
 import { CourseCard } from './CourseCard';
+import { WalletStatus } from './WalletStatus';
 
 const courses = [
   {
@@ -22,6 +28,7 @@ const courses = [
 ];
 
 function WalletConnection() {
+  const [tonConnectUI] = useTonConnectUI();
   const userAddress = useTonAddress();
 
   useEffect(() => {
@@ -47,6 +54,49 @@ function WalletConnection() {
     }
   }, [userAddress]);
 
+  const handlePurchase = async (courseId: number, price: number) => {
+    if (!userAddress) {
+      telegram.showAlert('Пожалуйста, подключите кошелек');
+      return;
+    }
+  
+    try {
+      // Отправляем транзакцию через TonConnect
+      const result = await tonConnectUI.sendTransaction({
+        validUntil: Math.floor(Date.now() / 1000) + 60 * 20, // 20 минут
+        messages: [
+          {
+            address: process.env.NEXT_PUBLIC_PROJECT_WALLET || '',
+            amount: (price * 1000000000).toString(), // конвертируем в наноTON и в строку
+          },
+        ],
+      });
+  
+      // Проверяем транзакцию на бэкенде
+      const verifyResponse = await fetch('/api/wallet/verify-purchase', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transactionHash: result.boc,
+          userWallet: userAddress,
+          amount: price,
+          telegramId: telegram.initDataUnsafe?.user?.id,
+        }),
+      });
+  
+      const verifyData = await verifyResponse.json();
+  
+      if (verifyData.success) {
+        telegram.showAlert('Покупка успешно совершена!');
+      } else {
+        telegram.showAlert('Ошибка при проверке платежа');
+      }
+    } catch (error) {
+      console.error('Purchase error:', error);
+      telegram.showAlert('Ошибка при совершении покупки');
+    }
+  };
+
   return (
     <div className="flex flex-col items-center w-full">
       <div className="mb-4">
@@ -62,22 +112,12 @@ function WalletConnection() {
             title={course.title}
             description={course.description}
             price={course.price}
-            onBuy={() => {
-              if (!userAddress) {
-                telegram.showAlert('Пожалуйста, подключите кошелек');
-                return;
-              }
-              telegram.showConfirm(`Купить курс за ${course.price} TON?`);
-            }}
+            onBuy={() => handlePurchase(course.id, course.price)}
           />
         ))}
       </div>
 
-      {userAddress && (
-        <p className="mt-4 text-sm text-gray-600">
-          Ваш адрес: {userAddress.slice(0, 6)}...{userAddress.slice(-4)}
-        </p>
-      )}
+      {userAddress && <WalletStatus address={userAddress} />}
     </div>
   );
 }
