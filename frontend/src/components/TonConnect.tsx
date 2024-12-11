@@ -1,4 +1,3 @@
-// src/components/TonConnect.tsx
 'use client';
 
 import { 
@@ -17,19 +16,34 @@ const courses = [
     id: 1,
     title: 'Основы TON',
     description: 'Базовый курс по блокчейну TON',
-    price: 10
+    price: 0.1
   },
   {
     id: 2,
     title: 'Смарт-контракты TON',
     description: 'Разработка смарт-контрактов для TON',
-    price: 20
+    price: 0.1
   }
 ];
 
+// Адрес проекта для тестнета
+const PROJECT_WALLET = "0QDXQV-nSC_PQDgw4SPIbhJhB0i9Qjun4SVV0LZQ46njk02I";
+
+interface TransactionResponse {
+  boc: string;
+  confirmed: boolean;
+  validUntil: number;
+}
 function WalletConnection() {
   const [tonConnectUI] = useTonConnectUI();
   const userAddress = useTonAddress();
+  const [logs, setLogs] = useState<string[]>([]);
+  const [paidCourses, setPaidCourses] = useState<{ [key: number]: string }>({});
+
+  const addLog = (message: string) => {
+    console.log(message); // Дублируем в консоль
+    setLogs(prev => [...prev, `${new Date().toISOString()}: ${message}`]);
+  };
 
   useEffect(() => {
     try {
@@ -37,15 +51,16 @@ function WalletConnection() {
       telegram.MainButton.show();
       
       if (telegram.user) {
-        telegram.showAlert(`Привет, ${telegram.user.username || 'пользователь'}!`);
+        addLog(`Пользователь: ${telegram.user.username || 'неизвестен'}`);
       }
     } catch (e) {
-      console.log('Telegram WebApp not initialized');
+      addLog('Ошибка инициализации Telegram WebApp');
     }
   }, []);
 
   useEffect(() => {
     if (userAddress) {
+      addLog(`Подключен кошелек: ${userAddress}`);
       telegram.MainButton.setText('Кошелек подключен');
       telegram.MainButton.disable();
     } else {
@@ -61,39 +76,98 @@ function WalletConnection() {
     }
   
     try {
-      // Отправляем транзакцию через TonConnect
-      const result = await tonConnectUI.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 60 * 20, // 20 минут
-        messages: [
-          {
-            address: process.env.NEXT_PUBLIC_PROJECT_WALLET || '',
-            amount: (price * 1000000000).toString(), // конвертируем в наноTON и в строку
-          },
-        ],
-      });
-  
-      // Проверяем транзакцию на бэкенде
-      const verifyResponse = await fetch('/api/wallet/verify-purchase', {
+      addLog(`Начало покупки курса ${courseId} за ${price} TON`);
+      addLog(`Адрес отправителя: ${userAddress}`);
+      addLog(`Адрес получателя: ${PROJECT_WALLET}`);
+
+      const amount = price * 1000000000;
+      addLog(`Сумма в нано: ${amount}`);
+
+      try {
+        const result = await tonConnectUI.sendTransaction({
+          validUntil: Math.floor(Date.now() / 1000) + 60 * 20,
+          messages: [
+            {
+              address: PROJECT_WALLET,
+              amount: amount.toString(),
+            },
+          ],
+        }) as TransactionResponse;
+
+        addLog(`Транзакция отправлена. Hash: ${result.boc}`);
+        
+        // Сохраняем транзакцию
+        setPaidCourses(prev => ({
+          ...prev,
+          [courseId]: result.boc
+        }));
+
+        telegram.showAlert('Оплата прошла успешно! Нажмите "Завершить" для получения возврата.');
+
+      } catch (txError: unknown) {
+        const error = txError as Error;
+        if (error.message.includes('Context must be an Activity')) {
+          addLog('Платёж мог пройти успешно. Проверьте транзакцию в TonKeeper');
+          telegram.showAlert('Если в TonKeeper транзакция прошла успешно, обновите страницу.');
+        } else {
+          throw error;
+        }
+      }
+
+    } catch (error: unknown) {
+      const err = error as Error;
+      addLog(`Ошибка: ${err.message}`);
+      if (!err.message.includes('Context must be an Activity')) {
+        telegram.showAlert('Ошибка при обработке платежа');
+      }
+    }
+  };
+
+  const handleComplete = async (courseId: number) => {
+    if (!userAddress) {
+      telegram.showAlert('Пожалуйста, подключите кошелек');
+      return;
+    }
+
+    const transactionHash = paidCourses[courseId];
+    if (!transactionHash) {
+      telegram.showAlert('Транзакция не найдена');
+      return;
+    }
+
+    try {
+      addLog(`Запрос возврата для курса ${courseId}`);
+      
+      const response = await fetch('http://localhost:3001/api/wallet/process-refund', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          transactionHash: result.boc,
+          transactionHash,
           userWallet: userAddress,
-          amount: price,
+          courseId,
           telegramId: telegram.initDataUnsafe?.user?.id,
         }),
       });
-  
-      const verifyData = await verifyResponse.json();
-  
-      if (verifyData.success) {
-        telegram.showAlert('Покупка успешно совершена!');
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Удаляем курс из оплаченных
+        setPaidCourses(prev => {
+          const newState = { ...prev };
+          delete newState[courseId];
+          return newState;
+        });
+        addLog(`Возврат выполнен успешно для курса ${courseId}`);
+        telegram.showAlert('Возврат средств выполнен успешно!');
       } else {
-        telegram.showAlert('Ошибка при проверке платежа');
+        addLog(`Ошибка возврата: ${data.error}`);
+        telegram.showAlert('Ошибка при возврате средств');
       }
-    } catch (error) {
-      console.error('Purchase error:', error);
-      telegram.showAlert('Ошибка при совершении покупки');
+    } catch (error: unknown) {
+      const err = error as Error;
+      addLog(`Ошибка возврата: ${err.message}`);
+      telegram.showAlert('Ошибка при обработке возврата');
     }
   };
 
@@ -112,19 +186,28 @@ function WalletConnection() {
             title={course.title}
             description={course.description}
             price={course.price}
+            isPaid={Boolean(paidCourses[course.id])}
             onBuy={() => handlePurchase(course.id, course.price)}
+            onComplete={() => handleComplete(course.id)}
           />
         ))}
       </div>
 
       {userAddress && <WalletStatus address={userAddress} />}
+
+      <div className="mt-8 w-full max-w-2xl p-4 bg-gray-100 rounded-lg">
+        <h2 className="font-bold mb-2">Логи:</h2>
+        <pre className="text-sm whitespace-pre-wrap">
+          {logs.join('\n')}
+        </pre>
+      </div>
     </div>
   );
 }
 
 export default function TonConnect() {
   return (
-    <TonConnectUIProvider manifestUrl="https://elder-illustration-audit-drum.trycloudflare.com/tonconnect-manifest.json">
+    <TonConnectUIProvider manifestUrl="https://grid-lap-sapphire-syracuse.trycloudflare.com/tonconnect-manifest.json">
       <WalletConnection />
     </TonConnectUIProvider>
   );

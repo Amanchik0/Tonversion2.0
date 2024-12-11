@@ -1,5 +1,5 @@
 // src/services/walletService.ts
-import { TonClient, Address, fromNano, toNano, WalletContractV4, Message, Dictionary } from 'ton';
+import { TonClient, Address, fromNano, toNano, WalletContractV4, Message, Dictionary } from '@ton/ton';
 import { mnemonicToPrivateKey } from 'ton-crypto';
 
 // Расширяем тип Message теми полями, которые нам нужны

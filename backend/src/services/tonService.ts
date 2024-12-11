@@ -1,5 +1,5 @@
 // src/services/tonService.ts
-import { TonClient, Address, Message, Dictionary, ContractProvider } from 'ton';
+import { TonClient, Address, Message, Dictionary, ContractProvider } from '@ton/ton';
 import { ContractData } from '../types';
 
 interface ExtendedMessage extends Message {
