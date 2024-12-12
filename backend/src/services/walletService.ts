@@ -1,51 +1,193 @@
-// src/services/walletService.ts
 import { TonClient, Address, fromNano, toNano, WalletContractV4, Message, Dictionary } from '@ton/ton';
 import { mnemonicToPrivateKey } from 'ton-crypto';
 
-// Расширяем тип Message теми полями, которые нам нужны
 interface ExtendedMessage extends Message {
   value: bigint;
   source?: Address;
   destination?: Address;
 }
 
-// Расширяем тип Transaction
+interface TransactionMessage {
+  value: bigint;
+  source?: Address;
+  destination?: Address;
+  hash?: () => Buffer;
+}
+
 interface ExtendedTransaction {
   hash: string;
   lt: string;
   utime: number;
-  inMessage?: ExtendedMessage;
-  outMessages: Dictionary<number, ExtendedMessage>;
+  inMessage?: TransactionMessage;
+  outMessages: Dictionary<number, TransactionMessage>;
   exitStatus?: number;
 }
 
 export class WalletService {
   private client: TonClient;
   private walletContract: WalletContractV4 | null = null;
+  private retryDelay = 2000;
+  private maxRetries = 5;
 
   constructor() {
     this.client = new TonClient({
-      endpoint: 'https://toncenter.com/api/v2/jsonRPC',
-      apiKey: process.env.TON_API_KEY
+      endpoint: 'https://testnet.toncenter.com/api/v2/jsonRPC',
+      apiKey: process.env.TON_API_KEY || '',
+      timeout: 30000
     });
   }
 
-  async initProjectWallet() {
+  // Правильная обработка base64 хеша
+  private base64ToHex(base64: string): string {
     try {
-      if (!process.env.WALLET_MNEMONIC) {
-        throw new Error('Wallet mnemonic not found in environment variables');
+      const cleanBase64 = base64.replace(/^te6ccg[A-Za-z0-9+/]*={0,3}/, '');
+      return Buffer.from(base64, 'base64').toString('hex');
+    } catch (error) {
+      console.error('Error converting base64 to hex:', error);
+      throw error;
+    }
+  }
+
+  private async waitForTransaction(hash: string): Promise<ExtendedTransaction | null> {
+    const projectAddress = process.env.PROJECT_WALLET_ADDRESS;
+    if (!projectAddress) {
+      throw new Error('Project wallet address not configured');
+    }
+
+    for (let i = 0; i < this.maxRetries; i++) {
+      try {
+        console.log(`Attempt ${i + 1} to find transaction...`);
+        
+        const transactions = await this.client.getTransactions(
+          Address.parse(projectAddress),
+          { limit: 20 }
+        );
+
+        const parsedTransactions = transactions as unknown as ExtendedTransaction[];
+        for (const tx of parsedTransactions) {
+          if (tx.hash && tx.hash.toLowerCase() === hash.toLowerCase()) {
+            return tx;
+          }
+        }
+
+        if (i < this.maxRetries - 1) {
+          console.log(`Transaction not found, waiting ${this.retryDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+        }
+      } catch (error: any) {
+        console.error(`Error in attempt ${i + 1}:`, error.message);
+        if (error.response?.status === 503) {
+          console.log('TON Center temporarily unavailable, retrying...');
+          await new Promise(resolve => setTimeout(resolve, this.retryDelay * 2));
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private async findTransaction(
+    expectedAmount: string,
+    senderAddress: string,
+    startTime: number
+  ): Promise<boolean> {
+    try {
+      console.log('Looking for transaction with params:', {
+        expectedAmount,
+        senderAddress,
+        startTime
+      });
+
+      const transactions = await this.client.getTransactions(
+        Address.parse(process.env.PROJECT_WALLET_ADDRESS!),
+        { limit: 50 }
+      );
+
+      console.log(`Found ${transactions.length} recent transactions`);
+      const parsedTransactions = transactions as unknown as ExtendedTransaction[];
+      for (const tx of parsedTransactions) {
+        // Пропускаем транзакции, которые старше времени начала проверки
+        if (tx.utime < startTime) {
+          continue;
+        }
+
+        if (!tx.inMessage?.value || !tx.inMessage?.source) {
+          continue;
+        }
+
+        const txAmount = tx.inMessage.value.toString();
+        const txSender = tx.inMessage.source.toString();
+
+        console.log('Checking transaction:', {
+          txAmount,
+          txSender,
+          txTime: tx.utime,
+          expectedAmount,
+          expectedSender: senderAddress
+        });
+
+        if (txAmount === expectedAmount && 
+            txSender.toLowerCase() === senderAddress.toLowerCase()) {
+          console.log('Found matching transaction!');
+          return true;
+        }
       }
 
-      const mnemonic = process.env.WALLET_MNEMONIC.split(' ');
-      const keyPair = await mnemonicToPrivateKey(mnemonic);
-      
-      // Здесь нужно инициализировать WalletContractV4
-      // Код зависит от типа используемого кошелька
-      
-      console.log('Project wallet initialized');
-    } catch (error) {
-      console.error('Failed to initialize project wallet:', error);
+      return false;
+    } catch (error: any) {
+      if (error.response?.status === 500) {
+        // Если ошибка 500, просто логируем и продолжаем
+        console.log('Got 500 error, will retry');
+        return false;
+      }
       throw error;
+    }
+  }
+
+  async verifyIncomingTransaction(
+    transactionHash: string,
+    expectedAmount: string,
+    senderAddress: string
+  ): Promise<boolean> {
+    try {
+      const startTime = Math.floor(Date.now() / 1000) - 60; // Начинаем поиск с минуту назад
+      const expectedNano = toNano(expectedAmount).toString();
+
+      console.log('Starting transaction verification:', {
+        hash: transactionHash,
+        expectedNano,
+        sender: senderAddress,
+        startTime
+      });
+
+      // Делаем несколько попыток найти транзакцию
+      for (let i = 0; i < this.maxRetries; i++) {
+        console.log(`Verification attempt ${i + 1}/${this.maxRetries}`);
+
+        const found = await this.findTransaction(
+          expectedNano,
+          senderAddress,
+          startTime
+        );
+
+        if (found) {
+          return true;
+        }
+
+        if (i < this.maxRetries - 1) {
+          console.log(`Waiting ${this.retryDelay}ms before next attempt...`);
+          await new Promise(resolve => setTimeout(resolve, this.retryDelay));
+        }
+      }
+
+      console.log('Transaction not found after all attempts');
+      return false;
+
+    } catch (error) {
+      console.error('Verification failed:', error);
+      return false;
     }
   }
 
@@ -59,35 +201,124 @@ export class WalletService {
     }
   }
 
-  async verifyIncomingTransaction(
-    transactionHash: string,
-    expectedAmount: string,
-    senderAddress: string
-  ): Promise<boolean> {
+  async initProjectWallet() {
     try {
-      const transactions = await this.client.getTransactions(
-        Address.parse(process.env.PROJECT_WALLET_ADDRESS || ''),
-        {
-          limit: 1,
-          hash: transactionHash
-        }
-      );
-
-      const tx = transactions[0] as unknown as ExtendedTransaction;
-
-      if (!tx || !tx.inMessage?.value) {
-        return false;
+      if (!process.env.MNEMONIC_WORDS) {
+        throw new Error('Wallet mnemonic not found');
       }
 
-      return (
-        tx.inMessage.value.toString() === toNano(expectedAmount).toString() &&
-        tx.inMessage.source?.toString() === senderAddress
-      );
+      const mnemonic = process.env.MNEMONIC_WORDS.split(' ');
+      const keyPair = await mnemonicToPrivateKey(mnemonic);
+      
+      this.walletContract = WalletContractV4.create({
+        publicKey: keyPair.publicKey,
+        workchain: 0
+      });
+      
+      console.log('Project wallet initialized');
     } catch (error) {
-      console.error('Failed to verify transaction:', error);
-      return false;
+      console.error('Failed to initialize project wallet:', error);
+      throw error;
     }
   }
+
+
+
+//   async verifyIncomingTransaction(
+//     transactionHash: string,
+//     expectedAmount: string,
+//     senderAddress: string
+//   ): Promise<boolean> {
+//     try {
+//       console.log('Starting verification:', {
+//         hash: transactionHash,
+//         amount: expectedAmount,
+//         sender: senderAddress,
+//         projectAddress: process.env.PROJECT_WALLET_ADDRESS
+//       });
+
+//       // Конвертируем base64 в hex если нужно
+//       const hash = transactionHash.startsWith('te6ccg') 
+//         ? Buffer.from(transactionHash, 'base64').toString('hex')
+//         : transactionHash;
+
+//       const checkOnce = async () => {
+//         try {
+//           console.log('Checking transaction with hash:', hash);
+          
+//           // Получаем транзакции
+//           const transactions = await this.client.getTransactions(
+//             Address.parse(process.env.PROJECT_WALLET_ADDRESS!),
+//             {
+//               limit: 20,
+//               hash: hash
+//             }
+//           );
+
+//           console.log('Founconst tx of transactionsd transactions:', transactions.length);
+//           const parsedTransactions = transactions as unknown as ExtendedTransaction[];
+//           for (const tx of parsedTransactions) {
+//             // Проверяем входящее сообщение
+//             if (!tx.inMessage?.value || !tx.inMessage?.source) {
+//               console.log('Transaction missing required fields');
+//               continue;
+//             }
+
+//             // Конвертируем адрес отправителя в нормальный формат
+//             const txSender = tx.inMessage.source.toString();
+            
+//             // Сравниваем значения
+//             const expectedNano = toNano(expectedAmount).toString();
+//             const actualValue = tx.inMessage.value.toString();
+
+//             console.log('Comparing values:', {
+//               expectedAmount: expectedNano,
+//               actualAmount: actualValue,
+//               expectedSender: senderAddress,
+//               actualSender: txSender
+//             });
+
+//             const isAmountMatch = expectedNano === actualValue;
+//             const isSenderMatch = txSender === senderAddress;
+
+//             if (isAmountMatch && isSenderMatch) {
+//               console.log('Transaction verified successfully');
+//               return true;
+//             }
+//           }
+
+//           return false;
+//         } catch (error) {
+//           console.error('Error in checkOnce:', error);
+//           return false;
+//         }
+//       };
+
+//       // Делаем три попытки проверки
+//       for (let i = 0; i < 3; i++) {
+//         console.log(`Verification attempt ${i + 1}`);
+        
+//         const found = await checkOnce();
+//         if (found) {
+//           return true;
+//         }
+
+//         if (i < 2) {
+//           console.log('Waiting before next attempt...');
+//           await new Promise(resolve => setTimeout(resolve, 5000));
+//         }
+//       }
+
+//       console.log('All verification attempts failed');
+//       return false;
+
+//     } catch (error) {
+//       console.error('Verification failed:', error);
+//       return false;
+//     }
+//   }
+
+
 
   async getTransactionHistory(
     address: string,

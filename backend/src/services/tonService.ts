@@ -25,7 +25,7 @@ export class TonService {
 
   constructor(contractData: ContractData) {
     this.client = new TonClient({
-      endpoint: 'https://toncenter.com/api/v2/jsonRPC',
+      endpoint: 'https://testnet.toncenter.com/api/v2/jsonRPC',
       apiKey: process.env.TON_API_KEY
     });
     this.contractAddress = contractData.address;

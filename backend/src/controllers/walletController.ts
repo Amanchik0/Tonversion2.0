@@ -1,15 +1,40 @@
-// src/controllers/walletController.ts
 import { Request, Response } from 'express';
 import { WalletService } from '../services/walletService';
 import { PurchaseService } from '../services/purchaseService';
+import { TonClient, Address, fromNano } from '@ton/ton';
+
+interface TransactionMessage {
+  value: bigint;
+  source?: Address;
+  destination?: Address;
+  hash?: () => Buffer;
+}
+
+interface ExtendedTransaction {
+  hash: string;
+  lt: string;
+  utime: number;
+  inMessage?: TransactionMessage;
+  outMessages: Map<number, TransactionMessage>;
+  totalFees: bigint;
+  storageFee?: bigint;
+  otherFee?: bigint;
+  description?: string;
+}
 
 export class WalletController {
+  private client: TonClient;
+
   constructor(
     private walletService: WalletService,
     private purchaseService: PurchaseService
-  ) {}
+  ) {
+    this.client = new TonClient({
+      endpoint: 'https://testnet.toncenter.com/api/v2/jsonRPC',
+      apiKey: process.env.TON_API_KEY || ''
+    });
+  }
 
-  // Получить баланс кошелька проекта
   getProjectBalance = async (req: Request, res: Response) => {
     try {
       const balance = await this.walletService.getBalance(process.env.PROJECT_WALLET_ADDRESS || '');
@@ -20,12 +45,17 @@ export class WalletController {
     }
   };
 
-  // Проверить транзакцию покупки
   verifyPurchase = async (req: Request, res: Response) => {
     try {
-      const { transactionHash, userWallet, amount } = req.body;
+      const { transactionHash, userWallet, amount, telegramId } = req.body;
 
-      // Проверяем поступление оплаты
+      console.log('Received verify purchase request:', {
+        transactionHash,
+        userWallet,
+        amount,
+        telegramId
+      });
+
       const isPaymentReceived = await this.walletService.verifyIncomingTransaction(
         transactionHash,
         amount.toString(),
@@ -36,20 +66,19 @@ export class WalletController {
         return res.status(400).json({ error: 'Payment not found' });
       }
 
-      // Проверяем, нет ли уже активной покупки
       const existingPurchase = await this.purchaseService.getPurchaseByTransactionHash(transactionHash);
       if (existingPurchase) {
         return res.status(400).json({ error: 'Transaction already processed' });
       }
 
-      // Создаем запись о покупке
       const purchase = await this.purchaseService.createPurchase({
-        telegramId: req.body.telegramId,
+        telegramId,
         walletAddress: userWallet,
         transactionHash,
         amount: parseFloat(amount)
       });
 
+      console.log('Purchase created:', purchase);
       res.json({ success: true, purchase });
     } catch (error) {
       console.error('Error verifying purchase:', error);
@@ -57,13 +86,11 @@ export class WalletController {
     }
   };
 
-  // Отправить возврат средств
   processRefund = async (req: Request, res: Response) => {
     try {
       const { purchaseId } = req.body;
-
-      // Получаем информацию о покупке
       const purchase = await this.purchaseService.getPurchaseById(purchaseId);
+      
       if (!purchase) {
         return res.status(404).json({ error: 'Purchase not found' });
       }
@@ -72,22 +99,17 @@ export class WalletController {
         return res.status(400).json({ error: 'Refund already processed' });
       }
 
-      // Вычисляем сумму возврата (70%)
       const refundAmount = (purchase.amount * 0.7).toString();
-
-      // Отправляем возврат
       const refundSuccess = await this.walletService.sendRefund(
         purchase.walletAddress,
-        refundAmount,
+        refundAmount
       );
 
       if (!refundSuccess) {
         return res.status(500).json({ error: 'Failed to process refund' });
       }
 
-      // Обновляем статус покупки
       const updatedPurchase = await this.purchaseService.completePurchase(purchaseId);
-
       res.json({ success: true, purchase: updatedPurchase });
     } catch (error) {
       console.error('Error processing refund:', error);
@@ -95,15 +117,41 @@ export class WalletController {
     }
   };
 
-  // Получить историю транзакций
-  getTransactionHistory = async (req: Request, res: Response) => {
+  getTransactions = async (req: Request, res: Response) => {
     try {
       const { address } = req.params;
-      const history = await this.walletService.getTransactionHistory(address);
-      res.json(history);
+      console.log('Getting transactions for address:', address);
+
+      const transactions = await this.client.getTransactions(
+        Address.parse(address),
+        { limit: 20 }
+      );
+
+      const formattedTransactions = transactions.map((tx: any) => {
+        try {
+          return {
+            hash: tx.hash || 'unknown',
+            time: tx.utime || 0,
+            value: tx.inMessage?.value ? fromNano(tx.inMessage.value) : '0',
+            from: tx.inMessage?.source?.toString(),
+            to: tx.outMessages?.values().next().value?.destination?.toString(),
+            lt: tx.lt?.toString(),
+            totalFees: tx.totalFees ? fromNano(tx.totalFees) : '0',
+            storageFee: tx.storageFee ? fromNano(tx.storageFee) : '0',
+            otherFee: tx.otherFee ? fromNano(tx.otherFee) : '0',
+            description: tx.description || ''
+          };
+        } catch (error) {
+          console.error('Error processing transaction:', error);
+          return null;
+        }
+      }).filter(Boolean);
+
+      console.log('Processed transactions:', formattedTransactions);
+      res.json(formattedTransactions);
     } catch (error) {
-      console.error('Error getting transaction history:', error);
-      res.status(500).json({ error: 'Failed to get transaction history' });
+      console.error('Failed to get transactions:', error);
+      res.status(500).json({ error: 'Failed to get transactions' });
     }
   };
 }

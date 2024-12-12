@@ -10,24 +10,26 @@ import { useEffect, useState } from 'react';
 import { telegram } from '../utils/telegram';
 import { CourseCard } from './CourseCard';
 import { WalletStatus } from './WalletStatus';
+import TransactionsViewer from './TransactionsViewer';
 
 const courses = [
   {
     id: 1,
     title: 'Основы TON',
     description: 'Базовый курс по блокчейну TON',
-    price: 0.1
+    price: 0.01
   },
   {
     id: 2,
     title: 'Смарт-контракты TON',
     description: 'Разработка смарт-контрактов для TON',
-    price: 0.1
+    price: 0.0000001
   }
 ];
 
 // Адрес проекта для тестнета
 const PROJECT_WALLET = "0QDXQV-nSC_PQDgw4SPIbhJhB0i9Qjun4SVV0LZQ46njk02I";
+// const PROJECT_WALLET = "UQDetz09xwcYGqStovaF2Awqarcel2IORninjvQ3ua9TQalG"
 
 interface TransactionResponse {
   boc: string;
@@ -86,7 +88,7 @@ function WalletConnection() {
       try {
         const result = await tonConnectUI.sendTransaction({
           validUntil: Math.floor(Date.now() / 1000) + 60 * 20,
-          messages: [
+          messages: [ 
             {
               address: PROJECT_WALLET,
               amount: amount.toString(),
@@ -95,7 +97,29 @@ function WalletConnection() {
         }) as TransactionResponse;
 
         addLog(`Транзакция отправлена. Hash: ${result.boc}`);
-        
+        const verifyResponse = await fetch('http://localhost:3001/api/wallet/verify-purchase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transactionHash: result.boc,
+            userWallet: userAddress,
+            amount: price,
+            telegramId: telegram.initDataUnsafe?.user?.id,
+          }),
+        });
+        const verifyData = await verifyResponse.json();
+  addLog(`Ответ от сервера верификации: ${JSON.stringify(verifyData)}`);
+
+  if (verifyData.success) {
+    setPaidCourses(prev => ({
+      ...prev,
+      [courseId]: result.boc
+    }));
+    telegram.showAlert('Оплата прошла успешно! Нажмите "Завершить" для получения возврата.');
+  } else {
+    addLog(`Ошибка проверки: ${verifyData.error}`);
+    telegram.showAlert('Ошибка при проверке платежа');
+  }
         // Сохраняем транзакцию
         setPaidCourses(prev => ({
           ...prev,
@@ -192,9 +216,13 @@ function WalletConnection() {
           />
         ))}
       </div>
-
       {userAddress && <WalletStatus address={userAddress} />}
-
+      {userAddress && (
+  <TransactionsViewer 
+    projectAddress={process.env.NEXT_PUBLIC_PROJECT_WALLET || ''}
+    userAddress={userAddress}
+  />
+)}
       <div className="mt-8 w-full max-w-2xl p-4 bg-gray-100 rounded-lg">
         <h2 className="font-bold mb-2">Логи:</h2>
         <pre className="text-sm whitespace-pre-wrap">
