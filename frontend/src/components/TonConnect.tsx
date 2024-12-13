@@ -11,6 +11,7 @@ import { telegram } from '../utils/telegram';
 import { CourseCard } from './CourseCard';
 import { WalletStatus } from './WalletStatus';
 import TransactionsViewer from './TransactionsViewer';
+import ProjectTransactions from './ProjectTransations';
 
 const courses = [
   {
@@ -216,7 +217,11 @@ function WalletConnection() {
           />
         ))}
       </div>
-      {userAddress && <WalletStatus address={userAddress} />}
+      
+      {userAddress && <WalletStatus address={userAddress} />
+      }
+              <ProjectTransactions />
+
       {userAddress && (
   <TransactionsViewer 
     projectAddress={process.env.NEXT_PUBLIC_PROJECT_WALLET || ''}

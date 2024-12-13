@@ -15,5 +15,5 @@ router.get('/balance', (walletController.getProjectBalance as RequestHandler));
 router.post('/verify-purchase', (walletController.verifyPurchase as RequestHandler));
 router.post('/process-refund', (walletController.processRefund as RequestHandler));
 router.get('/transactions/:address', (walletController.getTransactions as RequestHandler));
-
+router.get('/project-transactions', walletController.getProjectTransactions);
 export const walletRoutes = router; 

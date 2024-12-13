@@ -1,28 +1,41 @@
 import { TonClient, Address, fromNano, toNano, WalletContractV4, Message, Dictionary } from '@ton/ton';
 import { mnemonicToPrivateKey } from 'ton-crypto';
-
-interface ExtendedMessage extends Message {
-  value: bigint;
-  source?: Address;
-  destination?: Address;
-}
-
-interface TransactionMessage {
-  value: bigint;
-  source?: Address;
-  destination?: Address;
-  hash?: () => Buffer;
-}
-
-interface ExtendedTransaction {
-  hash: string;
-  lt: string;
-  utime: number;
-  inMessage?: TransactionMessage;
-  outMessages: Dictionary<number, TransactionMessage>;
-  exitStatus?: number;
-}
-
+interface MessageInfo {
+    type: string;
+    src: Address;
+    dest: Address;
+    value: {
+      coins: bigint;
+    };
+    createdAt: number;
+  }
+  
+  interface InMessage {
+    info: MessageInfo;
+    value?: bigint;
+    source?: Address;
+  }
+  
+  interface ExtendedTransaction {
+    hash: string;
+    utime: number;
+    lt: string;
+    inMessage?: InMessage;
+    outMessages: Map<number, {
+      value: bigint;
+      destination?: Address;
+    }>;
+    totalFees: {
+      coins: bigint;
+    };
+    description: {
+      createdAt: number;
+      type: string;
+    };
+    storageFee?: bigint;
+    otherFee?: bigint;
+    exitStatus?: number;
+  }
 export class WalletService {
   private client: TonClient;
   private walletContract: WalletContractV4 | null = null;
@@ -150,46 +163,58 @@ export class WalletService {
     transactionHash: string,
     expectedAmount: string,
     senderAddress: string
-  ): Promise<boolean> {
+): Promise<boolean> {
     try {
-      const startTime = Math.floor(Date.now() / 1000) - 60; // Начинаем поиск с минуту назад
-      const expectedNano = toNano(expectedAmount).toString();
+        console.log('Verifying transaction:', {
+            expectedAmount,
+            senderAddress
+        });
 
-      console.log('Starting transaction verification:', {
-        hash: transactionHash,
-        expectedNano,
-        sender: senderAddress,
-        startTime
-      });
-
-      // Делаем несколько попыток найти транзакцию
-      for (let i = 0; i < this.maxRetries; i++) {
-        console.log(`Verification attempt ${i + 1}/${this.maxRetries}`);
-
-        const found = await this.findTransaction(
-          expectedNano,
-          senderAddress,
-          startTime
+        // Нормализуем адрес отправителя в формат EQ...
+        const normalizedSender = Address.parse(senderAddress).toString();
+        
+        const transactions = await this.client.getTransactions(
+            Address.parse(process.env.PROJECT_WALLET_ADDRESS!),
+            { limit: 20 }
         );
 
-        if (found) {
-          return true;
-        }
+        const parsedTransactions = transactions as unknown as ExtendedTransaction[];
+        const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 300;
+        
+        const foundTransaction = parsedTransactions.find(tx => {
+            const inMessageValue = tx.inMessage?.info?.value?.coins;
+            const sender = tx.inMessage?.info?.src?.toString();
+            
+            if (!inMessageValue || !sender) return false;
 
-        if (i < this.maxRetries - 1) {
-          console.log(`Waiting ${this.retryDelay}ms before next attempt...`);
-          await new Promise(resolve => setTimeout(resolve, this.retryDelay));
-        }
-      }
+            const transactionAmount = fromNano(inMessageValue);
+            
+            // Теперь сравниваем с нормализованным адресом
+            const isAmountMatch = transactionAmount === expectedAmount;
+            const isSenderMatch = sender === normalizedSender;
+            const isRecent = (tx.description?.createdAt || 0) > fiveMinutesAgo;
 
-      console.log('Transaction not found after all attempts');
-      return false;
+            console.log('Checking transaction:', {
+                transactionAmount,
+                expectedAmount,
+                sender,
+                expectedSender: normalizedSender, // используем нормализованный адрес
+                isAmountMatch,
+                isSenderMatch,
+                isRecent,
+                txTime: new Date((tx.description?.createdAt || 0) * 1000).toISOString(),
+                currentTime: new Date().toISOString()
+            });
 
+            return isAmountMatch && isSenderMatch && isRecent;
+        });
+
+        return !!foundTransaction;
     } catch (error) {
-      console.error('Verification failed:', error);
-      return false;
+        console.error('Verification failed:', error);
+        return false;
     }
-  }
+}
 
   async getBalance(address: string): Promise<string> {
     try {
@@ -223,126 +248,64 @@ export class WalletService {
   }
 
 
-
-//   async verifyIncomingTransaction(
-//     transactionHash: string,
-//     expectedAmount: string,
-//     senderAddress: string
-//   ): Promise<boolean> {
-//     try {
-//       console.log('Starting verification:', {
-//         hash: transactionHash,
-//         amount: expectedAmount,
-//         sender: senderAddress,
-//         projectAddress: process.env.PROJECT_WALLET_ADDRESS
-//       });
-
-//       // Конвертируем base64 в hex если нужно
-//       const hash = transactionHash.startsWith('te6ccg') 
-//         ? Buffer.from(transactionHash, 'base64').toString('hex')
-//         : transactionHash;
-
-//       const checkOnce = async () => {
-//         try {
-//           console.log('Checking transaction with hash:', hash);
-          
-//           // Получаем транзакции
-//           const transactions = await this.client.getTransactions(
-//             Address.parse(process.env.PROJECT_WALLET_ADDRESS!),
-//             {
-//               limit: 20,
-//               hash: hash
-//             }
-//           );
-
-//           console.log('Founconst tx of transactionsd transactions:', transactions.length);
-//           const parsedTransactions = transactions as unknown as ExtendedTransaction[];
-//           for (const tx of parsedTransactions) {
-//             // Проверяем входящее сообщение
-//             if (!tx.inMessage?.value || !tx.inMessage?.source) {
-//               console.log('Transaction missing required fields');
-//               continue;
-//             }
-
-//             // Конвертируем адрес отправителя в нормальный формат
-//             const txSender = tx.inMessage.source.toString();
-            
-//             // Сравниваем значения
-//             const expectedNano = toNano(expectedAmount).toString();
-//             const actualValue = tx.inMessage.value.toString();
-
-//             console.log('Comparing values:', {
-//               expectedAmount: expectedNano,
-//               actualAmount: actualValue,
-//               expectedSender: senderAddress,
-//               actualSender: txSender
-//             });
-
-//             const isAmountMatch = expectedNano === actualValue;
-//             const isSenderMatch = txSender === senderAddress;
-
-//             if (isAmountMatch && isSenderMatch) {
-//               console.log('Transaction verified successfully');
-//               return true;
-//             }
-//           }
-
-//           return false;
-//         } catch (error) {
-//           console.error('Error in checkOnce:', error);
-//           return false;
-//         }
-//       };
-
-//       // Делаем три попытки проверки
-//       for (let i = 0; i < 3; i++) {
-//         console.log(`Verification attempt ${i + 1}`);
-        
-//         const found = await checkOnce();
-//         if (found) {
-//           return true;
-//         }
-
-//         if (i < 2) {
-//           console.log('Waiting before next attempt...');
-//           await new Promise(resolve => setTimeout(resolve, 5000));
-//         }
-//       }
-
-//       console.log('All verification attempts failed');
-//       return false;
-
-//     } catch (error) {
-//       console.error('Verification failed:', error);
-//       return false;
-//     }
-//   }
-
-
-
-  async getTransactionHistory(
-    address: string,
-    limit: number = 10
-  ): Promise<any[]> {
+  async getProjectTransactions(limit: number = 1) {
     try {
-      const transactions = await this.client.getTransactions(
-        Address.parse(address),
-        { limit }
-      );
+        console.log('Getting project wallet transactions');
+        const address = process.env.PROJECT_WALLET_ADDRESS;
+        
+        if (!address) {
+            throw new Error('Project wallet address not configured');
+        }
 
-      return (transactions as unknown as ExtendedTransaction[]).map(tx => ({
-        hash: tx.hash,
-        time: tx.utime,
-        value: tx.inMessage?.value ? fromNano(tx.inMessage.value) : '0',
-        from: tx.inMessage?.source?.toString(),
-        to: tx.outMessages.get(0)?.destination?.toString()
-      }));
+        const transactions = await this.client.getTransactions(
+            Address.parse(address),
+            { limit }
+        );
+
+        console.log(`Got ${transactions.length} transactions`);
+        const parsedTransactions = transactions as unknown as ExtendedTransaction[];
+
+        return parsedTransactions.map(tx => {
+            try {
+                const inMessageValue = tx.inMessage?.info?.value?.coins;
+                const totalFees = tx.totalFees?.coins;
+
+                console.log('Transaction values:', {
+                    inMessageValue,
+                    totalFees,
+                    hasInMessage: !!tx.inMessage,
+                    hasInfo: !!tx.inMessage?.info,
+                    hasValue: !!tx.inMessage?.info?.value,
+                });
+
+                return {
+                    hash: tx.hash || 'unknown',
+                    time: tx.description?.createdAt ? 
+                        new Date(tx.description.createdAt * 1000).toISOString() : 
+                        new Date().toISOString(),
+                    value: inMessageValue ? fromNano(inMessageValue) : '0',
+                    from: tx.inMessage?.info?.src?.toString() || 'unknown',
+                    to: tx.inMessage?.info?.dest?.toString() || 'unknown',
+                    totalFees: totalFees ? fromNano(totalFees) : '0'
+                };
+            } catch (error) {
+                console.error('Error processing transaction:', error);
+                return {
+                    hash: tx.hash || 'unknown',
+                    time: new Date().toISOString(),
+                    value: '0',
+                    from: 'error',
+                    to: 'error',
+                    totalFees: '0'
+                };
+            }
+        });
+
     } catch (error) {
-      console.error('Failed to get transaction history:', error);
-      return [];
+        console.error('Failed to get project transactions:', error);
+        throw error;
     }
-  }
-
+}
   async checkTransactionStatus(hash: string): Promise<'completed' | 'pending' | 'failed'> {
     try {
       const tx = await this.client.getTransactions(
@@ -367,9 +330,6 @@ export class WalletService {
       if (!this.walletContract) {
         throw new Error('Wallet contract not initialized');
       }
-
-      // Здесь будет логика отправки транзакции через WalletContractV4
-      // Это зависит от конкретной реализации кошелька
 
       return true;
     } catch (error) {

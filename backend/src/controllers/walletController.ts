@@ -45,6 +45,21 @@ export class WalletController {
     }
   };
 
+  getProjectTransactions = async (req: Request, res: Response) => {
+    try {
+        console.log('Starting to get project transactions');
+        const transactions = await this.walletService.getProjectTransactions();
+        console.log('Successfully got transactions');
+        res.json(transactions);
+    } catch (error) {
+        console.error('Error in controller getting project transactions:', error);
+        res.status(500).json({ 
+            error: 'Failed to get project transactions',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+};
+
   verifyPurchase = async (req: Request, res: Response) => {
     try {
       const { transactionHash, userWallet, amount, telegramId } = req.body;
