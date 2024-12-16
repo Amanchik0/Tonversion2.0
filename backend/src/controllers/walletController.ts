@@ -61,8 +61,11 @@ export class WalletController {
 };
 
   verifyPurchase = async (req: Request, res: Response) => {
+    const telegramId = '786669040';
+
+
     try {
-      const { transactionHash, userWallet, amount, telegramId } = req.body;
+      const { transactionHash, userWallet, amount } = req.body;
 
       console.log('Received verify purchase request:', {
         transactionHash,
@@ -139,7 +142,7 @@ export class WalletController {
 
       const transactions = await this.client.getTransactions(
         Address.parse(address),
-        { limit: 20 }
+        { limit: 1 }
       );
 
       const formattedTransactions = transactions.map((tx: any) => {

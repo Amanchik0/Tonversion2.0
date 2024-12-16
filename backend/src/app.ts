@@ -11,6 +11,11 @@ const app = express();
 // Middlewares
 app.use(cors());
 app.use(express.json());
+console.log('Loaded ENV:', {
+    CONTRACT_ADDRESS: process.env.CONTRACT_ADDRESS,
+    CONTRACT_PRICE: process.env.CONTRACT_PRICE,
+    TON_API_KEY: process.env.TON_API_KEY
+});
 
 // Routes
 app.use('/api/purchases', purchaseRoutes);

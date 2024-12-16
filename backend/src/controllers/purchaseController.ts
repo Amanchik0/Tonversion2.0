@@ -11,37 +11,47 @@ export class PurchaseController {
 
   createPurchase = async (req: Request, res: Response) => {
     try {
-      const { telegramId, walletAddress, transactionHash, amount } = req.body;
+        const { telegramId, walletAddress, transactionHash, amount } = req.body;
 
-      // Проверяем транзакцию
-      const isValid = await this.tonService.verifyPurchase(
-        transactionHash, 
-        amount.toString()
-      );
+        console.log('Processing purchase:', {
+            telegramId,
+            walletAddress,
+            transactionHash,
+            amount
+        });
 
-      if (!isValid) {
-        return res.status(400).json({ error: 'Invalid transaction' });
-      }
+        // Проверяем транзакцию
+        const isValid = await this.tonService.verifyPurchase(
+            transactionHash, 
+            amount.toString()
+        );
 
-      // Проверяем, нет ли уже активной покупки
-      const existingPurchase = await this.purchaseService.getActivePurchase(telegramId);
-      if (existingPurchase) {
-        return res.status(400).json({ error: 'User already has active purchase' });
-      }
+        console.log('Transaction verification result:', isValid);
 
-      const purchase = await this.purchaseService.createPurchase({
-        telegramId,
-        walletAddress,
-        transactionHash,
-        amount
-      });
+        if (!isValid) {
+            return res.status(400).json({ error: 'Invalid transaction' });
+        }
 
-      res.status(201).json(purchase);
+        // Проверяем, нет ли уже активной покупки
+        const existingPurchase = await this.purchaseService.getActivePurchase(telegramId);
+        if (existingPurchase) {
+            return res.status(400).json({ error: 'User already has active purchase' });
+        }
+
+        const purchase = await this.purchaseService.createPurchase({
+            telegramId,
+            walletAddress,
+            transactionHash,
+            amount
+        });
+
+        console.log('Purchase created:', purchase);
+        res.status(201).json(purchase);
     } catch (error) {
-      console.error('Purchase creation error:', error);
-      res.status(500).json({ error: 'Error creating purchase' });
+        console.error('Purchase creation error:', error);
+        res.status(500).json({ error: 'Error creating purchase' });
     }
-  };
+};
 
   getUserPurchases = async (req: Request, res: Response) => {
     try {

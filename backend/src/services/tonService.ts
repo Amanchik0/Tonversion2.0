@@ -1,89 +1,86 @@
 // src/services/tonService.ts
-import { TonClient, Address, Message, Dictionary, ContractProvider } from '@ton/ton';
+import { TonClient, Address } from '@ton/ton';
 import { ContractData } from '../types';
 
-interface ExtendedMessage extends Message {
-  value: bigint;
-  source?: Address;
-  destination?: Address;
+interface MessageInfo {
+    value: {
+        coins: bigint;
+    };
+    src?: Address;
+    dest?: Address;
+}
+
+interface ExtendedMessage {
+    info: MessageInfo;
 }
 
 interface ExtendedTransaction {
-  inMessage?: ExtendedMessage;
-  outMessages: Dictionary<number, ExtendedMessage>;
-  hash: string;
-}
-
-interface ContractState {
-  balance: bigint;
-  isDeployed: boolean;
+    inMessage?: ExtendedMessage;
+    hash: string;
 }
 
 export class TonService {
-  private client: TonClient;
-  private contractAddress: string;
+    private client: TonClient;
+    private contractAddress: Address;
+    private price: string;
 
-  constructor(contractData: ContractData) {
-    this.client = new TonClient({
-      endpoint: 'https://testnet.toncenter.com/api/v2/jsonRPC',
-      apiKey: process.env.TON_API_KEY
-    });
-    this.contractAddress = contractData.address;
-  }
+    constructor(contractData: ContractData) {
+        if (!contractData.address || contractData.address.trim() === '') {
+            throw new Error('Contract address is not configured');
+        }
 
-// Мы получаем hash транзакции и проверяем:
-async verifyPurchase(transactionHash: string, amount: string): Promise<boolean> {
-  try {
-    const transactions = await this.client.getTransactions(
-      Address.parse(this.contractAddress), 
-      {
-        limit: 1,
-        hash: transactionHash
-      }
-    );
-
-    if (transactions.length === 0) {
-      return false;
+        this.contractAddress = Address.parse(contractData.address);
+        this.price = contractData.price;
+        
+        this.client = new TonClient({
+            endpoint: 'https://testnet.toncenter.com/api/v2/jsonRPC',
+            apiKey: process.env.TON_API_KEY || ''
+        });
     }
 
-    const tx = transactions[0] as unknown as ExtendedTransaction;
-    
-    if (!tx.inMessage?.value) {
-      return false;
+    async verifyPurchase(transactionHash: string, amount: string): Promise<boolean> {
+
+
+
+        try {
+            console.log('Verifying purchase:', { transactionHash, amount });
+            
+            const transactions = await this.client.getTransactions(
+                this.contractAddress,
+                {
+                    limit: 1,
+                    hash: transactionHash
+                }
+            );
+
+            if (transactions.length === 0) {
+                console.log('No transaction found with hash:', transactionHash);
+                return false;
+            }
+
+            const tx = transactions[0] as unknown as ExtendedTransaction;
+            if (!tx.inMessage?.info?.value?.coins) {
+                console.log('Transaction has no input value');
+                return false;
+            }
+
+            const txAmount = tx.inMessage.info.value.coins.toString();
+            console.log('Transaction amount:', txAmount, 'Expected:', amount);
+
+            return txAmount === amount;
+        } catch (error) {
+            console.error('Purchase verification error:', error);
+            return false;
+        }
     }
 
-    // Здесь нужно добавить проверки:
-    // 1. Правильный адрес отправителя
-    // 2. Правильный адрес получателя (наш кошелек)
-    
-    return tx.inMessage.value.toString() === amount;
-    
-  } catch (error) {
-    console.error('Verify purchase error:', error);
-    return false;
-  }
-}
-
-  async getContractStatus(): Promise<boolean> {
-    try {
-      const balance = await this.client.getBalance(
-        Address.parse(this.contractAddress)
-      );
-      return balance > BigInt(0);
-    } catch (error) {
-      console.error('Get contract status error:', error);
-      return false;
+    async getContractStatus(): Promise<boolean> {
+        try {
+            const balance = await this.client.getBalance(this.contractAddress);
+            return balance > BigInt(0);
+        } catch (error) {
+            console.error('Contract status check error:', error);
+            return false;
+        }
     }
-  }
-
-  private async getContractState(): Promise<ContractState> {
-    const address = Address.parse(this.contractAddress);
-    const balance = await this.client.getBalance(address);
-    const isDeployed = await this.client.isContractDeployed(address);
-    
-    return {
-      balance,
-      isDeployed
-    };
-  }
 }
