@@ -63,7 +63,7 @@ export class WalletService {
         limit: 20 
       });
 
-      const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 300;
+      const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 600;
       
       return transactions.some(tx => {
         const transaction = tx as unknown as ExtendedTransaction;

@@ -12,6 +12,7 @@ import { CourseCard } from './CourseCard';
 import { WalletStatus } from './WalletStatus';
 import TransactionsViewer from './TransactionsViewer';
 import ProjectTransactions from './ProjectTransations';
+import { Address } from '@ton/core';
 
 const courses = [
   {
@@ -72,81 +73,134 @@ function WalletConnection() {
     }
   }, [userAddress]);
 
-  const handlePurchase = async (courseId: number, price: number) => {
-    if (!userAddress) {
+
+
+
+  const waitForTransactionConfirmation = async (recipient: string, sender: string, amount: string): Promise<any> => {
+    const maxRetries = 10; // Максимальное количество попыток
+    const delay = 3000; // Задержка между попытками в миллисекундах
+
+    for (let i = 0; i < maxRetries; i++) {
+        const response = await fetch('https://testnet.toncenter.com/api/v2/getTransactions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${process.env.NEXT_PUBLIC_TON_API_KEY}`,
+            },
+            body: JSON.stringify({ address: recipient, limit: 10 }),
+        });
+
+        if (!response.ok) {
+            console.error('Ошибка при получении транзакций:', response.statusText);
+            continue;
+        }
+
+        const data = await response.json();
+        const transaction = data.result.find((tx: any) => {
+            return (
+                tx.in_msg.source === sender &&
+                tx.in_msg.destination === recipient &&
+                parseFloat(tx.in_msg.value) === parseFloat(amount)
+            );
+        });
+
+        if (transaction) {
+            return transaction; // Возвращаем найденную транзакцию
+        }
+
+        await new Promise(res => setTimeout(res, delay)); // Ждём перед следующей попыткой
+    }
+
+    return null; // Если не нашли
+};
+
+function convertToRawAddress(base64Address: string): string {
+  try {
+      const address = Address.parse(base64Address);
+      return address.toString(); // Возвращает адрес в формате Hex
+  } catch (error) {
+      console.error('Ошибка преобразования адреса:', error);
+      return '';
+  }
+}
+
+const handlePurchase = async (courseId: number, price: number) => {
+  if (!userAddress) {
       telegram.showAlert('Пожалуйста, подключите кошелек');
       return;
-    }
-  
-    try {
+  }
+
+  try {
       addLog(`Начало покупки курса ${courseId} за ${price} TON`);
-      addLog(`Адрес отправителя: ${userAddress}`);
-      addLog(`Адрес получателя: ${PROJECT_WALLET}`);
+      const amount = price * 1_000_000_000; // Сумма в нанотонах
+      const rawSender = convertToRawAddress(userAddress);
+      const rawRecipient = convertToRawAddress(PROJECT_WALLET);
 
-      const amount = price * 1000000000;
-      addLog(`Сумма в нано: ${amount}`);
+      addLog(`Адрес отправителя (Hex): ${rawSender}`);
+      addLog(`Адрес получателя (Hex): ${rawRecipient}`);
 
-      try {
-        const result = await tonConnectUI.sendTransaction({
+      // Отправляем транзакцию
+      const result = await tonConnectUI.sendTransaction({
           validUntil: Math.floor(Date.now() / 1000) + 60 * 20,
-          messages: [ 
-            {
-              address: PROJECT_WALLET,
-              amount: amount.toString(),
-            },
+          messages: [
+              {
+                  address: PROJECT_WALLET,
+                  amount: amount.toString(),
+              },
           ],
-        }) as TransactionResponse;
+      }) as TransactionResponse;
 
-        addLog(`Транзакция отправлена. Hash: ${result.boc}`);
-        const verifyResponse = await fetch('http://localhost:3001/api/wallet/verify-purchase', {
+      addLog(`Транзакция отправлена, BOC: ${result.boc}`);
+
+      // Ожидаем подтверждения транзакции
+      addLog('Ожидаем подтверждения транзакции...');
+      const transaction = await waitForTransactionConfirmation(rawRecipient, rawSender, amount.toString());
+
+      if (!transaction) {
+          addLog('Не удалось найти подтверждённую транзакцию');
+          telegram.showAlert('Ошибка обработки транзакции. Попробуйте позже.');
+          return;
+      }
+
+      addLog(`Подтверждённая транзакция: ${JSON.stringify(transaction)}`);
+
+      // Отправляем данные на сервер для верификации
+      const verifyResponse = await fetch('http://localhost:3001/api/wallet/verify-purchase', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            transactionHash: result.boc,
-            userWallet: userAddress,
-            amount: price,
-            telegramId: telegram.initDataUnsafe?.user?.id,
+              transactionHash: transaction.transaction_id.hash,
+              userWallet: userAddress,
+              amount: price,
+              telegramId: telegram.initDataUnsafe?.user?.id,
           }),
-        });
-        const verifyData = await verifyResponse.json();
-  addLog(`Ответ от сервера верификации: ${JSON.stringify(verifyData)}`);
+      });
 
-  if (verifyData.success) {
-    setPaidCourses(prev => ({
-      ...prev,
-      [courseId]: result.boc
-    }));
-    telegram.showAlert('Оплата прошла успешно! Нажмите "Завершить" для получения возврата.');
-  } else {
-    addLog(`Ошибка проверки: ${verifyData.error}`);
-    telegram.showAlert('Ошибка при проверке платежа');
-  }
-        // Сохраняем транзакцию
-        setPaidCourses(prev => ({
-          ...prev,
-          [courseId]: result.boc
-        }));
+      const verifyData = await verifyResponse.json();
+      addLog(`Ответ от сервера верификации: ${JSON.stringify(verifyData)}`);
 
-        telegram.showAlert('Оплата прошла успешно! Нажмите "Завершить" для получения возврата.');
-
-      } catch (txError: unknown) {
-        const error = txError as Error;
-        if (error.message.includes('Context must be an Activity')) {
-          addLog('Платёж мог пройти успешно. Проверьте транзакцию в TonKeeper');
-          telegram.showAlert('Если в TonKeeper транзакция прошла успешно, обновите страницу.');
-        } else {
-          throw error;
-        }
+      if (verifyData.success) {
+          setPaidCourses(prev => ({
+              ...prev,
+              [courseId]: transaction.transaction_id.hash,
+          }));
+          telegram.showAlert('Оплата прошла успешно! Нажмите "Завершить" для получения возврата.');
+      } else {
+          addLog(`Ошибка проверки: ${verifyData.error}`);
+          telegram.showAlert('Ошибка при проверке платежа');
       }
-
-    } catch (error: unknown) {
+  } catch (error: unknown) {
       const err = error as Error;
-      addLog(`Ошибка: ${err.message}`);
-      if (!err.message.includes('Context must be an Activity')) {
-        telegram.showAlert('Ошибка при обработке платежа');
-      }
-    }
-  };
+      addLog(`Ошибка при отправке транзакции: ${err.message}`);
+      telegram.showAlert('Ошибка при обработке платежа');
+  }
+};
+
+
+
+
+
+
 
   const handleComplete = async (courseId: number) => {
     if (!userAddress) {
