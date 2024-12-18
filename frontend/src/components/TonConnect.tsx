@@ -240,7 +240,7 @@ function WalletConnection() {
 
 export default function TonConnect() {
   return (
-    <TonConnectUIProvider manifestUrl="https://grid-lap-sapphire-syracuse.trycloudflare.com/tonconnect-manifest.json">
+    <TonConnectUIProvider manifestUrl="https://discretion-heritage-storm-solo.trycloudflare.com/tonconnect-manifest.json">
       <WalletConnection />
     </TonConnectUIProvider>
   );
