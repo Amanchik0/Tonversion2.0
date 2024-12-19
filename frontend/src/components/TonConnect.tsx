@@ -126,73 +126,62 @@ function convertToRawAddress(base64Address: string): string {
 
 const handlePurchase = async (courseId: number, price: number) => {
   if (!userAddress) {
-      telegram.showAlert('Пожалуйста, подключите кошелек');
-      return;
+    telegram.showAlert('Пожалуйста, подключите кошелек');
+    return;
   }
 
   try {
-      addLog(`Начало покупки курса ${courseId} за ${price} TON`);
-      const amount = price * 1_000_000_000; // Сумма в нанотонах
-      const rawSender = convertToRawAddress(userAddress);
-      const rawRecipient = convertToRawAddress(PROJECT_WALLET);
+    addLog(`Начало покупки курса ${courseId} за ${price} TON`);
+    const amount = price * 1_000_000_000; // Сумма в нанотонах
+    const rawSender = convertToRawAddress(userAddress);
+    const rawRecipient = convertToRawAddress(PROJECT_WALLET);
 
-      addLog(`Адрес отправителя (Hex): ${rawSender}`);
-      addLog(`Адрес получателя (Hex): ${rawRecipient}`);
+    addLog(`Адрес отправителя (Hex): ${rawSender}`);
+    addLog(`Адрес получателя (Hex): ${rawRecipient}`);
 
-      // Отправляем транзакцию
-      const result = await tonConnectUI.sendTransaction({
-          validUntil: Math.floor(Date.now() / 1000) + 60 * 20,
-          messages: [
-              {
-                  address: PROJECT_WALLET,
-                  amount: amount.toString(),
-              },
-          ],
-      }) as TransactionResponse;
+    // Отправляем транзакцию
+    await tonConnectUI.sendTransaction({
+      validUntil: Math.floor(Date.now() / 1000) + 60 * 20,
+      messages: [
+        {
+          address: PROJECT_WALLET,
+          amount: amount.toString(),
+        },
+      ],
+    });
 
-      addLog(`Транзакция отправлена, BOC: ${result.boc}`);
+    addLog(`Транзакция отправлена. `);
 
-      // Ожидаем подтверждения транзакции
-      addLog('Ожидаем подтверждения транзакции...');
-      const transaction = await waitForTransactionConfirmation(rawRecipient, rawSender, amount.toString());
+    // Вместо ожидания подтверждения в сети TON, сразу обращаемся к бэкенду
+    // Бэкенд вернёт success: true, так как мы замокали verifyPurchase
+    const verifyResponse = await fetch('http://localhost:3001/api/wallet/verify-purchase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transactionHash: 'fakehash', // Можно передать любой строковый хэш
+        userWallet: userAddress,
+        amount: price,
+        telegramId: telegram.initDataUnsafe?.user?.id,
+      }),
+    });
 
-      if (!transaction) {
-          addLog('Не удалось найти подтверждённую транзакцию');
-          telegram.showAlert('Ошибка обработки транзакции. Попробуйте позже.');
-          return;
-      }
+    const verifyData = await verifyResponse.json();
+    addLog(`Ответ от сервера верификации: ${JSON.stringify(verifyData)}`);
 
-      addLog(`Подтверждённая транзакция: ${JSON.stringify(transaction)}`);
-
-      // Отправляем данные на сервер для верификации
-      const verifyResponse = await fetch('http://localhost:3001/api/wallet/verify-purchase', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-              transactionHash: transaction.transaction_id.hash,
-              userWallet: userAddress,
-              amount: price,
-              telegramId: telegram.initDataUnsafe?.user?.id,
-          }),
-      });
-
-      const verifyData = await verifyResponse.json();
-      addLog(`Ответ от сервера верификации: ${JSON.stringify(verifyData)}`);
-
-      if (verifyData.success) {
-          setPaidCourses(prev => ({
-              ...prev,
-              [courseId]: transaction.transaction_id.hash,
-          }));
-          telegram.showAlert('Оплата прошла успешно! Нажмите "Завершить" для получения возврата.');
-      } else {
-          addLog(`Ошибка проверки: ${verifyData.error}`);
-          telegram.showAlert('Ошибка при проверке платежа');
-      }
+    if (verifyData.success) {
+      setPaidCourses(prev => ({
+        ...prev,
+        [courseId]: 'fakehash',
+      }));
+      telegram.showAlert('Оплата прошла успешно!');
+    } else {
+      addLog(`Ошибка проверки: ${verifyData.error}`);
+      telegram.showAlert('Ошибка при проверке платежа');
+    }
   } catch (error: unknown) {
-      const err = error as Error;
-      addLog(`Ошибка при отправке транзакции: ${err.message}`);
-      telegram.showAlert('Ошибка при обработке платежа');
+    const err = error as Error;
+    addLog(`Ошибка при отправке транзакции: ${err.message}`);
+    telegram.showAlert('Ошибка при обработке платежа');
   }
 };
 
@@ -202,53 +191,54 @@ const handlePurchase = async (courseId: number, price: number) => {
 
 
 
-  const handleComplete = async (courseId: number) => {
-    if (!userAddress) {
-      telegram.showAlert('Пожалуйста, подключите кошелек');
-      return;
-    }
 
-    const transactionHash = paidCourses[courseId];
-    if (!transactionHash) {
-      telegram.showAlert('Транзакция не найдена');
-      return;
-    }
+const handleComplete = async (courseId: number) => {
+  if (!userAddress) {
+    telegram.showAlert('Пожалуйста, подключите кошелек');
+    return;
+  }
 
-    try {
-      addLog(`Запрос возврата для курса ${courseId}`);
-      
-      const response = await fetch('http://localhost:3001/api/wallet/process-refund', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          transactionHash,
-          userWallet: userAddress,
-          courseId,
-          telegramId: telegram.initDataUnsafe?.user?.id,
-        }),
+  const transactionHash = paidCourses[courseId];
+  if (!transactionHash) {
+    telegram.showAlert('Транзакция не найдена');
+    return;
+  }
+
+  try {
+    addLog(`Запрос возврата для курса ${courseId}`);
+    
+    const response = await fetch('http://localhost:3001/api/wallet/process-refund', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transactionHash,
+        userWallet: userAddress,
+        courseId,
+        telegramId: telegram.initDataUnsafe?.user?.id,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      // Удаляем курс из оплаченных
+      setPaidCourses(prev => {
+        const newState = { ...prev };
+        delete newState[courseId];
+        return newState;
       });
-
-      const data = await response.json();
-
-      if (data.success) {
-        // Удаляем курс из оплаченных
-        setPaidCourses(prev => {
-          const newState = { ...prev };
-          delete newState[courseId];
-          return newState;
-        });
-        addLog(`Возврат выполнен успешно для курса ${courseId}`);
-        telegram.showAlert('Возврат средств выполнен успешно!');
-      } else {
-        addLog(`Ошибка возврата: ${data.error}`);
-        telegram.showAlert('Ошибка при возврате средств');
-      }
-    } catch (error: unknown) {
-      const err = error as Error;
-      addLog(`Ошибка возврата: ${err.message}`);
-      telegram.showAlert('Ошибка при обработке возврата');
+      addLog(`Возврат выполнен успешно для курса ${courseId}`);
+      telegram.showAlert('Возврат средств выполнен успешно!');
+    } else {
+      addLog(`Ошибка возврата: ${data.error}`);
+      telegram.showAlert('Ошибка при возврате средств');
     }
-  };
+  } catch (error: unknown) {
+    const err = error as Error;
+    addLog(`Ошибка возврата: ${err.message}`);
+    telegram.showAlert('Ошибка при обработке возврата');
+  }
+};
 
   return (
     <div className="flex flex-col items-center w-full">
@@ -294,7 +284,7 @@ const handlePurchase = async (courseId: number, price: number) => {
 
 export default function TonConnect() {
   return (
-    <TonConnectUIProvider manifestUrl="https://discretion-heritage-storm-solo.trycloudflare.com/tonconnect-manifest.json">
+    <TonConnectUIProvider manifestUrl="https://initiatives-significance-cancer-greatest.trycloudflare.com/tonconnect-manifest.json">
       <WalletConnection />
     </TonConnectUIProvider>
   );
