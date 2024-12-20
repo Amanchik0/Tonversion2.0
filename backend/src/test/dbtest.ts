@@ -8,7 +8,6 @@ async function testDatabaseConnection() {
     await connectDB();
     console.log('Connected to MongoDB Atlas');
 
-    // Тестовые данные
     const testPurchase = {
       telegramId: '123456789',
       walletAddress: 'EQD4FPq-PRE...',

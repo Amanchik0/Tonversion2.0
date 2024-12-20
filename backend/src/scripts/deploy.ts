@@ -26,11 +26,11 @@ class PurchaseContract implements Contract {
 
 function createContractCode(): Cell {
     return beginCell()
-        .storeUint(0, 32) // version
-        .storeUint(0, 64) // timestamp
+        .storeUint(0, 32) 
+        .storeUint(0, 64) 
         .storeRef(
             beginCell()
-                .storeUint(1, 32) // op code for purchase
+                .storeUint(1, 32) 
                 .endCell()
         )
         .endCell();
@@ -38,9 +38,9 @@ function createContractCode(): Cell {
 
 function createContractData(ownerAddress: Address): Cell {
     return beginCell()
-        .storeCoins(toNano('10')) // price in TON
-        .storeAddress(ownerAddress) // owner address
-        .storeUint(0, 1) // state
+        .storeCoins(toNano('10')) 
+        .storeAddress(ownerAddress) 
+        .storeUint(0, 1)
         .endCell();
 }
 
@@ -63,7 +63,6 @@ async function deploy() {
         console.log('Generating keys from mnemonic...');
         const keyPair = await mnemonicToPrivateKey(mnemonic);
         
-        // Создаем кошельки разных версий
         const walletV4 = WalletContractV4.create({
             publicKey: keyPair.publicKey,
             workchain: 0
@@ -77,14 +76,12 @@ async function deploy() {
         console.log('Wallet V4 address:', walletV4.address.toString());
         console.log('Wallet V3R2 address:', walletV3R2.address.toString());
         
-        // Проверяем балансы
         const balanceV4 = await client.getBalance(walletV4.address);
         const balanceV3R2 = await client.getBalance(walletV3R2.address);
         
         console.log('V4 Wallet balance:', balanceV4.toString());
         console.log('V3R2 Wallet balance:', balanceV3R2.toString());
 
-        // Выбираем кошелек с балансом
         const wallet = balanceV4 > 0 ? walletV4 : balanceV3R2 > 0 ? walletV3R2 : walletV4;
         const balance = balanceV4 > 0 ? balanceV4 : balanceV3R2;
 
@@ -164,7 +161,6 @@ async function deploy() {
     }
 }
 
-// Запускаем деплой
 deploy().then(() => {
     console.log('Deployment completed');
     process.exit(0);

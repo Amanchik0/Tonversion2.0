@@ -29,7 +29,6 @@ const courses = [
   }
 ];
 
-// Адрес проекта для тестнета
 const PROJECT_WALLET = "0QDXQV-nSC_PQDgw4SPIbhJhB0i9Qjun4SVV0LZQ46njk02I";
 // const PROJECT_WALLET = "UQDetz09xwcYGqStovaF2Awqarcel2IORninjvQ3ua9TQalG"
 
@@ -45,7 +44,7 @@ function WalletConnection() {
   const [paidCourses, setPaidCourses] = useState<{ [key: number]: string }>({});
 
   const addLog = (message: string) => {
-    console.log(message); // Дублируем в консоль
+    console.log(message); 
     setLogs(prev => [...prev, `${new Date().toISOString()}: ${message}`]);
   };
 
@@ -77,8 +76,8 @@ function WalletConnection() {
 
 
   const waitForTransactionConfirmation = async (recipient: string, sender: string, amount: string): Promise<any> => {
-    const maxRetries = 10; // Максимальное количество попыток
-    const delay = 3000; // Задержка между попытками в миллисекундах
+    const maxRetries = 10; 
+    const delay = 3000; 
 
     for (let i = 0; i < maxRetries; i++) {
         const response = await fetch('https://testnet.toncenter.com/api/v2/getTransactions', {
@@ -105,19 +104,19 @@ function WalletConnection() {
         });
 
         if (transaction) {
-            return transaction; // Возвращаем найденную транзакцию
+            return transaction; 
         }
 
-        await new Promise(res => setTimeout(res, delay)); // Ждём перед следующей попыткой
+        await new Promise(res => setTimeout(res, delay)); 
     }
 
-    return null; // Если не нашли
+    return null; 
 };
 
 function convertToRawAddress(base64Address: string): string {
   try {
       const address = Address.parse(base64Address);
-      return address.toString(); // Возвращает адрес в формате Hex
+      return address.toString(); 
   } catch (error) {
       console.error('Ошибка преобразования адреса:', error);
       return '';
@@ -152,13 +151,11 @@ const handlePurchase = async (courseId: number, price: number) => {
 
     addLog(`Транзакция отправлена. `);
 
-    // Вместо ожидания подтверждения в сети TON, сразу обращаемся к бэкенду
-    // Бэкенд вернёт success: true, так как мы замокали verifyPurchase
     const verifyResponse = await fetch('http://localhost:3001/api/wallet/verify-purchase', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        transactionHash: 'fakehash', // Можно передать любой строковый хэш
+        transactionHash: 'fakehash', 
         userWallet: userAddress,
         amount: price,
         telegramId: telegram.initDataUnsafe?.user?.id,
@@ -221,7 +218,6 @@ const handleComplete = async (courseId: number) => {
     const data = await response.json();
 
     if (data.success) {
-      // Удаляем курс из оплаченных
       setPaidCourses(prev => {
         const newState = { ...prev };
         delete newState[courseId];
@@ -231,12 +227,12 @@ const handleComplete = async (courseId: number) => {
       telegram.showAlert('Возврат средств выполнен успешно!');
     } else {
       addLog(`Ошибка возврата: ${data.error}`);
-      telegram.showAlert('Ошибка при возврате средств');
+      // telegram.showAlert('Попробуйте позже так как это тестовый тут он не работает ');
     }
   } catch (error: unknown) {
     const err = error as Error;
     addLog(`Ошибка возврата: ${err.message}`);
-    telegram.showAlert('Ошибка при обработке возврата');
+    telegram.showAlert('попробуйте позже так как это тестовый тут он не работает');
   }
 };
 

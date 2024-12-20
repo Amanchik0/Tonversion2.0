@@ -26,7 +26,6 @@ export class PurchaseController {
             amount
         });
 
-        // Проверяем транзакцию
         const isValid = await this.tonService.verifyPurchase(
             transactionHash, 
             amount.toString()
@@ -38,7 +37,6 @@ export class PurchaseController {
             return res.status(400).json({ error: 'Invalid transaction' });
         }
 
-        // Проверяем, нет ли уже активной покупки
         const existingPurchase = await this.purchaseService.getActivePurchase(telegramId);
         if (existingPurchase) {
             return res.status(400).json({ error: 'User already has active purchase' });

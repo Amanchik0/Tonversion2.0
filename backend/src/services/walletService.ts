@@ -1,7 +1,7 @@
 // services/walletService.ts
 import { TonClient, Address, fromNano, WalletContractV4, SendMode } from '@ton/ton';
 import { mnemonicToPrivateKey } from 'ton-crypto';
-import { Cell } from '@ton/core'; // Если понадобится пустой Cell для body/stateInit
+import { Cell } from '@ton/core'; 
 
 interface TransactionInfo {
   hash: string;
@@ -12,8 +12,6 @@ interface TransactionInfo {
   fees: string;
 }
 
-// НЕ определяем свой MessageRelaxed, используем из библиотеки
-// import { MessageRelaxed } from '@ton/ton'; // Если понадобится, но обычно не нужно
 type Wallet4Message = {
   to: Address;
   value: bigint;
@@ -176,8 +174,7 @@ export class WalletService {
             createdLt: nanoAmount,
             createdAt: 0
           },
-          // body и stateInit не обязательно указывать
-          body: new Cell() // добавляем пустой Cell, чтобы удовлетворить обязательное поле
+          body: new Cell() 
 
         }]
       });
