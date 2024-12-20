@@ -77,42 +77,48 @@ function WalletConnection() {
 
 
   const waitForTransactionConfirmation = async (recipient: string, sender: string, amount: string): Promise<any> => {
-    const maxRetries = 10; // Максимальное количество попыток
-    const delay = 3000; // Задержка между попытками в миллисекундах
-
+    const maxRetries = 10; // Максимальное число попыток
+    const delay = 3000; // Задержка между попытками
+  
+    const apiKey = process.env.NEXT_PUBLIC_TON_API_KEY || '';
+  
     for (let i = 0; i < maxRetries; i++) {
-        const response = await fetch('https://testnet.toncenter.com/api/v2/getTransactions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${process.env.NEXT_PUBLIC_TON_API_KEY}`,
-            },
-            body: JSON.stringify({ address: recipient, limit: 10 }),
-        });
-
-        if (!response.ok) {
-            console.error('Ошибка при получении транзакций:', response.statusText);
-            continue;
-        }
-
-        const data = await response.json();
-        const transaction = data.result.find((tx: any) => {
-            return (
-                tx.in_msg.source === sender &&
-                tx.in_msg.destination === recipient &&
-                parseFloat(tx.in_msg.value) === parseFloat(amount)
-            );
-        });
-
-        if (transaction) {
-            return transaction; // Возвращаем найденную транзакцию
-        }
-
-        await new Promise(res => setTimeout(res, delay)); // Ждём перед следующей попыткой
+      // Формируем URL с query-параметрами
+      const url = `https://testnet.toncenter.com/api/v2/getTransactions?address=${recipient}&limit=10`;
+  
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'X-API-KEY': apiKey
+        },
+      });
+  
+      if (!response.ok) {
+        console.error('Ошибка при получении транзакций:', response.statusText);
+        await new Promise(res => setTimeout(res, delay));
+        continue;
+      }
+  
+      const data = await response.json();
+      // Поиск транзакции по критериям
+      const transaction = data.result.find((tx: any) => {
+        return (
+          tx.in_msg.source === sender &&
+          tx.in_msg.destination === recipient &&
+          parseFloat(tx.in_msg.value) === parseFloat(amount)
+        );
+      });
+  
+      if (transaction) {
+        return transaction;
+      }
+  
+      await new Promise(res => setTimeout(res, delay));
     }
-
-    return null; // Если не нашли
-};
+  
+    return null;
+  };
+  
 
 function convertToRawAddress(base64Address: string): string {
   try {
@@ -162,7 +168,10 @@ const handlePurchase = async (courseId: number, price: number) => {
           return;
       }
 
-      addLog(`Подтверждённая транзакция: ${JSON.stringify(transaction)}`);
+      // Здесь мы можем вывести хэш транзакции
+      addLog(`Подтверждённая транзакция найдена!`);
+      addLog(`Хэш транзакции: ${transaction.transaction_id.hash}`);
+      addLog(`Подробности транзакции: ${JSON.stringify(transaction)}`);
 
       // Отправляем данные на сервер для верификации
       const verifyResponse = await fetch('http://localhost:3001/api/wallet/verify-purchase', {
@@ -195,6 +204,7 @@ const handlePurchase = async (courseId: number, price: number) => {
       telegram.showAlert('Ошибка при обработке платежа');
   }
 };
+
 
 
 
@@ -294,7 +304,7 @@ const handlePurchase = async (courseId: number, price: number) => {
 
 export default function TonConnect() {
   return (
-    <TonConnectUIProvider manifestUrl="https://discretion-heritage-storm-solo.trycloudflare.com/tonconnect-manifest.json">
+    <TonConnectUIProvider manifestUrl="https://ec-raleigh-willow-cent.trycloudflare.com/tonconnect-manifest.json">
       <WalletConnection />
     </TonConnectUIProvider>
   );
